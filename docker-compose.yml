@@ -1,0 +1,104 @@
+version: "3.9"
+
+# ─────────────────────────────────────────
+# Named Volumes
+# ─────────────────────────────────────────
+volumes:
+  HNG-nginx-logs:        # Shared log volume (task requirement)
+    driver: local
+  nextcloud-data:        # Nextcloud persistent storage
+    driver: local
+  nextcloud-db:          # MariaDB persistent storage
+    driver: local
+
+# ─────────────────────────────────────────
+# Networks
+# ─────────────────────────────────────────
+networks:
+  hng-net:
+    driver: bridge
+
+# ─────────────────────────────────────────
+# Services
+# ─────────────────────────────────────────
+services:
+
+  # ── 1. MariaDB (Nextcloud database) ──────
+  db:
+    image: mariadb:10.11
+    container_name: hng-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - nextcloud-db:/var/lib/mysql
+    networks:
+      - hng-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── 2. Nextcloud (pre-built HNG image) ───
+  nextcloud:
+    image: kefaslungu/hng-nextcloud:latest
+    container_name: hng-nextcloud
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      NEXTCLOUD_ADMIN_USER: ${NEXTCLOUD_ADMIN_USER}
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_ADMIN_PASSWORD}
+      NEXTCLOUD_TRUSTED_DOMAINS: ${SERVER_IP}
+    volumes:
+      - nextcloud-data:/var/www/html
+      - HNG-nginx-logs:/var/log/nginx:ro   # read-only as required
+    networks:
+      - hng-net
+
+  # ── 3. Nginx (reverse proxy + JSON logger) ─
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: hng-nginx
+    restart: unless-stopped
+    depends_on:
+      - nextcloud
+    ports:
+      - "80:80"          # Public HTTP (Nextcloud access by IP)
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - HNG-nginx-logs:/var/log/nginx:rw   # read-write: nginx owns this
+    networks:
+      - hng-net
+
+  # ── 4. Detector (your Python daemon) ─────
+  detector:
+    build:
+      context: ./detector
+      dockerfile: Dockerfile
+    container_name: hng-detector
+    restart: unless-stopped
+    depends_on:
+      - nginx
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+    volumes:
+      - HNG-nginx-logs:/var/log/nginx:ro   # read-only log access
+      - ./detector/config.yaml:/app/config.yaml:ro
+      - ./detector/audit.log:/app/audit.log
+    networks:
+      - hng-net
+    cap_add:
+      - NET_ADMIN      # Required for iptables commands
+    privileged: true   # Required for iptables on host network
+    ports:
+      - "8080:8080"    # Live metrics dashboard
