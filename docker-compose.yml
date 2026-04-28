@@ -51,6 +51,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # ADD THIS:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/status.php"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     environment:
       MYSQL_HOST: db
       MYSQL_DATABASE: nextcloud
@@ -71,7 +78,8 @@ services:
     container_name: hng-nginx
     restart: unless-stopped
     depends_on:
-      - nextcloud
+      nextcloud:
+        condition: service_healthy
     ports:
       - "80:80"          # Public HTTP (Nextcloud access by IP)
     volumes:
