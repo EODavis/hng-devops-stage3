@@ -1,0 +1,113 @@
+# ═══════════════════════════════════════════════════════════════
+# HNG Stage 3 — Anomaly Detection Engine Config
+# All thresholds, paths, and settings live here.
+# Never hardcode these values in Python source files.
+# ═══════════════════════════════════════════════════════════════
+
+
+# ── Log Monitoring ─────────────────────────────────────────────
+log:
+  path: /var/log/nginx/hng-access.log   # Shared HNG-nginx-logs volume path
+  encoding: utf-8
+  poll_interval: 0.1                     # Seconds between tail reads (100ms)
+
+
+# ── Sliding Window Settings ────────────────────────────────────
+sliding_window:
+  per_ip_seconds: 60       # Track per-IP requests over last 60 seconds
+  global_seconds: 60       # Track global requests over last 60 seconds
+  cleanup_interval: 30     # Seconds between stale IP window cleanup
+
+
+# ── Rolling Baseline Settings ──────────────────────────────────
+baseline:
+  window_minutes: 30           # Rolling window size for mean/stddev calculation
+  recalc_interval: 60          # Recalculate baseline every 60 seconds
+  min_samples: 30              # Minimum data points before baseline is trusted
+  floor_mean: 1.0              # Minimum mean (prevents division by zero)
+  floor_stddev: 0.5            # Minimum stddev (prevents oversensitivity)
+  hourly_slots: 24             # Number of per-hour slots to maintain
+  prefer_current_hour: true    # Use current hour's baseline when mature enough
+  current_hour_min_samples: 20 # Samples needed before preferring hourly baseline
+
+
+# ── Anomaly Detection Thresholds ───────────────────────────────
+detection:
+  zscore_threshold: 3.0        # Z-score above this triggers anomaly flag
+  rate_multiplier: 5.0         # Rate > 5x baseline mean triggers anomaly flag
+  error_rate_multiplier: 3.0   # 4xx/5xx rate > 3x baseline error rate → tighten thresholds
+  tightened_zscore: 2.0        # Z-score threshold when error surge is active
+  tightened_multiplier: 3.0    # Rate multiplier when error surge is active
+  global_alert_only: true      # Global anomaly → alert only, no block
+
+
+# ── Blocking Settings ──────────────────────────────────────────
+blocking:
+  enabled: true
+  backend: iptables            # Only supported backend
+  chain: INPUT                 # iptables chain to insert DROP rules
+  alert_within_seconds: 10     # Must block + alert within 10 seconds of detection
+
+  # Auto-unban backoff schedule (minutes)
+  # Offense 1 → 10 min, Offense 2 → 30 min, Offense 3 → 120 min, 4+ → permanent
+  unban_schedule:
+    - 10
+    - 30
+    - 120
+    - -1                       # -1 means permanent ban
+
+
+# ── Slack Notifications
+slack:
+  enabled: true
+  webhook_url: ""              # Injected at runtime from SLACK_WEBHOOK_URL env var
+  timeout_seconds: 5
+  alerts:
+    ban:
+      enabled: true
+      emoji: "🚨"
+      title: "IP BANNED"
+    unban:
+      enabled: true
+      emoji: "✅"
+      title: "IP UNBANNED"
+    global_anomaly:
+      enabled: true
+      emoji: "⚠️"
+      title: "GLOBAL TRAFFIC SPIKE"
+    baseline_update:
+      enabled: false           # Too noisy — disable Slack for baseline recalcs
+
+
+# ── Audit Log ──────────────────────────────────────────────────
+audit:
+  path: /app/audit.log
+  # Format: [timestamp] ACTION ip | condition | rate | baseline | duration
+  actions:
+    - BAN
+    - UNBAN
+    - BASELINE_RECALC
+    - GLOBAL_ANOMALY
+
+
+# ── Dashboard Settings ─────────────────────────────────────────
+dashboard:
+  enabled: true
+  host: "0.0.0.0"             # Bind to all interfaces
+  port: 8080
+  refresh_interval: 3          # Frontend auto-refresh every 3 seconds
+  top_ips_count: 10            # Show top 10 source IPs
+
+
+# ── Metrics Collection ─────────────────────────────────────────
+metrics:
+  cpu_interval: 2              # psutil CPU measurement interval (seconds)
+  history_minutes: 60          # How long to keep req/s history for graphs
+
+
+# ── Baseline Graph ─────────────────────────────────────────────
+# For the required Baseline-graph.png screenshot
+graph:
+  enabled: true
+  output_path: /app/baseline_graph.png
+  update_interval: 300         # Regenerate graph every 5 minutes
