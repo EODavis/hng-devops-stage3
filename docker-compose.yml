@@ -38,7 +38,7 @@ services:
     networks:
       - hng-net
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -103,6 +103,7 @@ services:
       - HNG-nginx-logs:/var/log/nginx:ro   # read-only log access
       - ./detector/config.yaml:/app/config.yaml:ro
       - ./detector/audit.log:/app/audit.log
+      - ./detector/detector.log:/app/detector.log
     networks:
       - hng-net
     cap_add:

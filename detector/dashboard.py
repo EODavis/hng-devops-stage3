@@ -566,18 +566,14 @@ class Dashboard:
             "monitor"          : self.monitor.get_stats(),
         }
 
+    # REPLACE WITH:
     def _run_flask(self):
         """Run Flask — disable reloader and debugger for daemon use."""
-        import os
-        # Suppress Flask startup banner
-        os.environ["WERKZEUG_RUN_MAIN"] = "true"
+        import logging
         log = logging.getLogger("werkzeug")
         log.setLevel(logging.ERROR)
 
-        self.app.run(
-            host=self.host,
-            port=self.port,
-            debug=False,
-            use_reloader=False,
-            threaded=True,
-        )
+        from werkzeug.serving import make_server
+        server = make_server(self.host, self.port, self.app)
+        logger.info(f"Dashboard serving on {self.host}:{self.port}")
+        server.serve_forever()
